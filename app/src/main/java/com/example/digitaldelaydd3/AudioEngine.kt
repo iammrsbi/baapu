@@ -237,3 +237,171 @@ object AudioFileProcessor {
         delayMs: Int,
         ancEnabled: Boolean,
         ancLevel: Float,
+        onFinished: () -> Unit
+    ) {
+        stopPreview()
+        isPreviewing = true
+        thread {
+            try {
+                val dec = decodePcm(ctx, uri, 60) ?: return@thread
+                val wet = applyEffects(dec.first, dec.second, dec.third, eLevel, fBack, delayMs, ancEnabled, ancLevel, true)
+                val chMask = if (dec.third == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
+                val minBuf = AudioTrack.getMinBufferSize(dec.second, chMask, AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(2048)
+                val track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(dec.second).setChannelMask(chMask).build())
+                    .setBufferSizeInBytes(minBuf)
+                    .build()
+                previewTrack = track
+                track.play()
+                var offset = 0
+                while (isPreviewing && offset < wet.size) {
+                    val len = minOf(1024, wet.size - offset)
+                    track.write(wet, offset, len)
+                    offset += len
+                }
+            } catch (_: Exception) {
+            } finally {
+                stopPreview()
+                onFinished()
+            }
+        }
+    }
+
+    fun exportEchoWav(
+        ctx: Context,
+        uri: Uri,
+        eLevel: Float,
+        fBack: Float,
+        delayMs: Int,
+        ancEnabled: Boolean,
+        ancLevel: Float,
+        onSaved: (Uri?, String) -> Unit
+    ) {
+        thread {
+            val dec = decodePcm(ctx, uri, 300)
+            if (dec == null) {
+                onSaved(null, "Audio decode failed!")
+                return@thread
+            }
+            val wet = applyEffects(dec.first, dec.second, dec.third, eLevel, fBack, delayMs, ancEnabled, ancLevel, true)
+            val byteBuf = ByteBuffer.allocate(wet.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (s in wet) byteBuf.putShort(s)
+            val name = "Baapu_Echo_${System.currentTimeMillis()}.wav"
+            val savedUri = writeWavToMediaStore(ctx, byteBuf.array(), dec.second, dec.third, name)
+            onSaved(savedUri, "Saved: Music/Baapu/$name")
+        }
+    }
+
+    private fun decodePcm(ctx: Context, uri: Uri, maxSec: Int): Triple<ShortArray, Int, Int>? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(ctx, uri, null)
+            var trackIdx = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    trackIdx = i
+                    format = f
+                    break
+                }
+            }
+            if (trackIdx < 0 || format == null) return null
+            extractor.selectTrack(trackIdx)
+            val mime = format.getString(MediaFormat.KEY_MIME)!!
+            val sr = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val ch = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val maxSamples = sr * ch * maxSec
+
+            val codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val outSamples = ArrayList<Short>()
+            val info = MediaCodec.BufferInfo()
+            var isEOS = false
+            while (!isEOS && outSamples.size < maxSamples) {
+                val inIdx = codec.dequeueInputBuffer(5000)
+                if (inIdx >= 0) {
+                    val buf = codec.getInputBuffer(inIdx)!!
+                    val sz = extractor.readSampleData(buf, 0)
+                    if (sz < 0) {
+                        codec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        isEOS = true
+                    } else {
+                        codec.queueInputBuffer(inIdx, 0, sz, extractor.sampleTime, 0)
+                        extractor.advance()
+                    }
+                }
+                val outIdx = codec.dequeueOutputBuffer(info, 5000)
+                if (outIdx >= 0) {
+                    val outBuf = codec.getOutputBuffer(outIdx)!!
+                    outBuf.position(info.offset)
+                    outBuf.limit(info.offset + info.size)
+                    val sb = outBuf.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                    while (sb.hasRemaining() && outSamples.size < maxSamples) {
+                        outSamples.add(sb.get())
+                    }
+                    codec.releaseOutputBuffer(outIdx, false)
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) break
+                }
+            }
+            codec.stop()
+            codec.release()
+            Triple(outSamples.toShortArray(), sr, ch)
+        } catch (_: Exception) {
+            null
+        } finally {
+            extractor.release()
+        }
+    }
+
+    fun writeWavToMediaStore(ctx: Context, pcmData: ByteArray, sampleRate: Int, channels: Int, fileName: String): Uri? {
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray())
+            putInt(36 + pcmData.size)
+            put("WAVE".toByteArray())
+            put("fmt ".toByteArray())
+            putInt(16)
+            putShort(1)
+            putShort(channels.toShort())
+            putInt(sampleRate)
+            putInt(sampleRate * channels * 2)
+            putShort((channels * 2).toShort())
+            putShort(16)
+            put("data".toByteArray())
+            putInt(pcmData.size)
+        }.array()
+
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/Baapu")
+                }
+                val uri = ctx.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                uri?.let {
+                    ctx.contentResolver.openOutputStream(it)?.use { os ->
+                        os.write(header)
+                        os.write(pcmData)
+                    }
+                }
+                uri
+            } else {
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Baapu")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, fileName)
+                FileOutputStream(file).use { fos ->
+                    fos.write(header)
+                    fos.write(pcmData)
+                }
+                Uri.fromFile(file)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
