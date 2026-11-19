@@ -11,6 +11,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.*
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -42,7 +46,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Boss800App()
+                var showSplash by remember { mutableStateOf(true) }
+                LaunchedEffect(Unit) {
+                    delay(2400L)
+                    showSplash = false
+                }
+                Crossfade(targetState = showSplash, animationSpec = tween(700), label = "splash") { isSplash ->
+                    if (isSplash) SplashScreen() else Boss800App()
+                }
             }
         }
     }
@@ -120,6 +131,12 @@ fun Boss800App() {
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var selectedFileName by remember { mutableStateOf("No Audio File Selected") }
     var statusMsg by remember { mutableStateOf("Ready • Use Earphones for Best Echo") }
+    var lastSavedUri by remember { mutableStateOf<Uri?>(null) }
+    fun toast(msg: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
     var waveList by remember { mutableStateOf(List(48) { i -> abs(sin(i * 0.25f)) * 0.65f + 0.12f }) }
 
     val modes = listOf("STD", "ANALOG", "TAPE", "HOLD")
@@ -181,10 +198,30 @@ fun Boss800App() {
         }
     }
 
+    val bgInf = rememberInfiniteTransition(label = "bgInf")
+    val shift by bgInf.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "bgShift"
+    )
+    val pulse by bgInf.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(currentTheme.bgColors))
+            .background(
+                Brush.linearGradient(
+                    colors = currentTheme.bgColors,
+                    start = Offset(0f, 0f),
+                    end = Offset(300f + 900f * shift, 2000f - 700f * shift)
+                )
+            )
     ) {
         Column(
             modifier = Modifier
@@ -254,4 +291,196 @@ fun Boss800App() {
                                     AudioFileProcessor.stopPreview()
                                     isPlayingFile = false
                                 } else if (!bypassed) {
-                                    
+                                    if (isRecording) {
+                                        engine.stopAndSaveRecordingWav { u, msg ->
+                                            if (u != null) lastSavedUri = u
+                                            statusMsg = msg
+                                        }
+                                    }
+                                    engine.stop()
+                                    bypassed = true
+                                    isRecording = false
+                                    statusMsg = "Live echo band hai"
+                                }
+                                tab = idx
+                            }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = title,
+                            color = if (sel) Color.Black else Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Waveform + status
+            GlassCard(
+                currentTheme,
+                borderColor = if (!bypassed) currentTheme.accent.copy(alpha = 0.25f + 0.65f * pulse) else Color(0x33FFFFFF)
+            ) {
+                Waveform(waveList, currentTheme.accent)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = statusMsg,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Presets
+            GlassCard(currentTheme) {
+                Text("PRESETS", color = currentTheme.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AppRepository.presets.forEach { p ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x33FFFFFF))
+                                .border(1.dp, currentTheme.accent.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .clickable {
+                                    mode = p.modeIdx
+                                    val mx = when (p.modeIdx) {
+                                        0 -> 150
+                                        1 -> 350
+                                        else -> 800
+                                    }
+                                    eLevel = p.eLevel
+                                    fBack = p.fBack
+                                    dTime = ((p.dTimeMs - 15f) / (mx - 15f)).coerceIn(0f, 1f)
+                                    statusMsg = "Preset: ${p.name}"
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(p.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Knobs + mode
+            GlassCard(currentTheme) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Knob("EFFECT", "${(eLevel * 100).roundToInt()}%", eLevel, currentTheme.accent) { eLevel = it }
+                    Knob("FEEDBACK", "${(fBack * 100).roundToInt()}%", fBack, currentTheme.accent) { fBack = it }
+                    Knob("TIME", "$ms ms", dTime, currentTheme.accent) { dTime = it }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("MODE", color = currentTheme.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                ChipRow(modes, mode, currentTheme.accent) { mode = it }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // ANC
+            GlassCard(currentTheme) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("NOISE CANCEL (ANC)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Switch(
+                        checked = ancEnabled,
+                        onCheckedChange = { ancEnabled = it },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = currentTheme.accent,
+                            checkedThumbColor = Color.Black
+                        )
+                    )
+                }
+                if (ancEnabled) {
+                    Slider(
+                        value = ancLevel,
+                        onValueChange = { ancLevel = it },
+                        colors = SliderDefaults.colors(
+                            thumbColor = currentTheme.accent,
+                            activeTrackColor = currentTheme.accent
+                        )
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (tab == 0) {
+                // ---------- LIVE MIC ----------
+                GlassCard(currentTheme) {
+                    Text("OUTPUT", color = currentTheme.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    ChipRow(routes, outRoute, currentTheme.accent) { outRoute = it }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "⚠️ Bina earphone ke seeti (feedback) bajegi! Wired earphone lagayein.",
+                        color = Color(0xFFFFB74D),
+                        fontSize = 11.sp
+                    )
+                    if (!bypassed) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Output badalne ke liye echo band karke dobara start karein.",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                ActionButton(
+                    text = when {
+                        !hasPerm -> "🔑 ALLOW MIC PERMISSION"
+                        bypassed -> "▶ START LIVE ECHO"
+                        else -> "■ STOP LIVE ECHO"
+                    },
+                    color = currentTheme.accent,
+                    pulse = hasPerm && !bypassed
+                ) {
+                    if (!hasPerm) {
+                        permLauncher.launch(perms)
+                    } else if (bypassed) {
+                        engine.outRoute = outRoute
+                        engine.start()
+                        bypassed = false
+                        statusMsg = "LIVE ECHO ON • $ms ms"
+                    } else {
+                        if (isRecording) {
+                            engine.stopAndSaveRecordingWav { u, msg ->
+                                if (u != null) lastSavedUri = u
+                                statusMsg = msg
+                            }
+                        }
+                        engine.stop()
+                        bypassed = true
+                        isRecording = false
+                        statusMsg = "Live echo band hai"
+                    }
+                }
+
+                if (!bypassed) {
+                    Spacer(Modifier.height(10.dp))
+                    ActionButton(
+                        text = if (isRecording) "💾 SAVE RECORDING" else "● RECORD WAV",
+                        color = if (isRecording) Color(0xFFE53935) else Color(0x66FFFFFF),
+                        textColor = Color.White
+                    ) {
+                        if (!isRecording
