@@ -10,8 +10,8 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_btn_speak_now"
-        android:roundIcon="@android:drawable/ic_btn_speak_now"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
         android:label="baapu"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
