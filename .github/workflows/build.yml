@@ -15,8 +15,8 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-      - name: Auto Fix Manifest URL
-        run: python3 -c 'import re; p="app/src/main/AndroidManifest.xml"; s=open(p).read(); s=re.sub(r"xmlns:android=\"[^\"]*\"", "xmlns:android=\"http://android.com\"", s); open(p,"w").write(s)'
+      - name: Write Clean Manifest
+        run: echo "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPG1hbmlmZXN0IHhtbG5zOmFuZHJvaWQ9Imh0dHA6Ly9zY2hlbWFzLmFuZHJvaWQuY29tL2Fway9yZXMvYW5kcm9pZCI+CiAgICA8dXNlcy1wZXJtaXNzaW9uIGFuZHJvaWQ6bmFtZT0iYW5kcm9pZC5wZXJtaXNzaW9uLlJFQ09SRF9BVURJTyIgLz4KICAgIDx1c2VzLXBlcm1pc3Npb24gYW5kcm9pZDpuYW1lPSJhbmRyb2lkLnBlcm1pc3Npb24uTU9ESUZZX0FVRElPX1NFVFRJTkdTIiAvPgogICAgPHVzZXMtcGVybWlzc2lvbiBhbmRyb2lkOm5hbWU9ImFuZHJvaWQucGVybWlzc2lvbi5CTFVTVE9PVEgiIC8+CiAgICA8dXNlcy1wZXJtaXNzaW9uIGFuZHJvaWQ6bmFtZT0iYW5kcm9pZC5wZXJtaXNzaW9uLkJMVUVUT09USF9DT05ORUNUIiAvPgogICAgPHVzZXMtcGVybWlzc2lvbiBhbmRyb2lkOm5hbWU9ImFuZHJvaWQucGVybWlzc2lvbi5SRUFEX01FRElBX0FVRElPIiAvPgogICAgPHVzZXMtcGVybWlzc2lvbiBhbmRyb2lkOm5hbWU9ImFuZHJvaWQucGVybWlzc2lvbi5SRUFEX0VYVEVSTkFMX1NUT1JBR0UiIGFuZHJvaWQ6bWF4U2RrVmVyc2lvbj0iMzIiIC8+CiAgICA8YXBwbGljYXRpb24gYW5kcm9pZDphbGxvd0JhY2t1cD0idHJ1ZSIgYW5kcm9pZDppY29uPSJAYW5kcm9pZDpkcmF3YWJsZS9pY19idG5fc3BlYWtfbm93IiBhbmRyb2lkOnJvdW5kSWNvbj0iQGFuZHJvaWQ6ZHJhd2FibGUvaWNfYnRuX3NwZWFrX25vdyIgYW5kcm9pZDpsYWJlbD0iYmFhcHUiIGFuZHJvaWQ6dGhlbWU9IkBhbmRyb2lkOnN0eWxlL1RoZW1lLk1hdGVyaWFsLk5vQWN0aW9uQmFyIj4KICAgICAgICA8YWN0aXZpdHkgYW5kcm9pZDpuYW1lPSIuTWFpbkFjdGl2aXR5IiBhbmRyb2lkOmV4cG9ydGVkPSJ0cnVlIj4KICAgICAgICAgICAgPGludGVudC1maWx0ZXI+CiAgICAgICAgICAgICAgICA8YWN0aW9uIGFuZHJvaWQ6bmFtZT0iYW5kcm9pZC5pbnRlbnQuYWN0aW9uLk1BSU4iIC8+CiAgICAgICAgICAgICAgICA8Y2F0ZWdvcnkgYW5kcm9pZDpuYW1lPSJhbmRyb2lkLmludGVudC5jYXRlZ29yeS5MQVVOQ0hFUiIgLz4KICAgICAgICAgICAgPC9pbnRlbnQtZmlsdGVyPgogICAgICAgIDwvYWN0aXZpdHk+CiAgICA8L2FwcGxpY2F0aW9uPgo8L21hbmlmZXN0Pg==" | base64 -d > app/src/main/AndroidManifest.xml
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
