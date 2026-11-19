@@ -483,4 +483,323 @@ fun Boss800App() {
                         color = if (isRecording) Color(0xFFE53935) else Color(0x66FFFFFF),
                         textColor = Color.White
                     ) {
-                        if (!isRecording
+                        if (!isRecording) {
+                            engine.startRecordingWav()
+                            isRecording = true
+                            statusMsg = "Recording chal rahi hai..."
+                        } else {
+                            isRecording = false
+                            engine.stopAndSaveRecordingWav { u, msg ->
+                                if (u != null) lastSavedUri = u
+                                statusMsg = msg
+                                toast(msg)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // ---------- FILE UPLOAD ----------
+                GlassCard(currentTheme) {
+                    Text("SELECTED FILE", color = currentTheme.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        selectedFileName,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                ActionButton("📁 SELECT AUDIO FILE", currentTheme.accent) {
+                    filePicker.launch("audio/*")
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                ActionButton(
+                    text = if (isPlayingFile) "■ STOP PREVIEW" else "▶ PREVIEW ECHO",
+                    color = Color(0x66FFFFFF),
+                    textColor = Color.White,
+                    enabled = selectedUri != null
+                ) {
+                    selectedUri?.let { u ->
+                        if (isPlayingFile) {
+                            AudioFileProcessor.stopPreview()
+                            isPlayingFile = false
+                        } else {
+                            isPlayingFile = true
+                            AudioFileProcessor.playPreview(ctx, u, eLevel, fBack, ms, ancEnabled, ancLevel) {
+                                isPlayingFile = false
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                ActionButton(
+                    text = "💾 SAVE ECHO FILE",
+                    color = Color(0x66FFFFFF),
+                    textColor = Color.White,
+                    enabled = selectedUri != null
+                ) {
+                    selectedUri?.let { u ->
+                        statusMsg = "Echo file ban rahi hai..."
+                        AudioFileProcessor.exportEchoWav(ctx, u, eLevel, fBack, ms, ancEnabled, ancLevel) { saved, msg ->
+                            if (saved != null) lastSavedUri = saved
+                            statusMsg = msg
+                            toast(msg)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                ActionButton(
+                    text = "SHARE ON WHATSAPP",
+                    color = Color(0xFF25D366),
+                    enabled = lastSavedUri != null
+                ) {
+                    lastSavedUri?.let { u ->
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "audio/*"
+                            putExtra(android.content.Intent.EXTRA_STREAM, u)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        try {
+                            ctx.startActivity(
+                                android.content.Intent(send)
+                                    .setPackage("com.whatsapp")
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (e: Exception) {
+                            try {
+                                ctx.startActivity(
+                                    android.content.Intent.createChooser(send, "Share")
+                                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            } catch (_: Exception) {
+                                toast("Share nahi ho paya")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+        }
+    }
+}
+
+@Composable
+fun GlassCard(
+    theme: AppThemeConfig,
+    borderColor: Color = Color(0x33FFFFFF),
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brush.verticalGradient(theme.glassTint))
+            .border(1.dp, borderColor, RoundedCornerShape(20.dp))
+            .padding(14.dp),
+        content = content
+    )
+}
+
+@Composable
+fun Waveform(values: List<Float>, accent: Color) {
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(90.dp)
+    ) {
+        val n = values.size.coerceAtLeast(1)
+        val bw = size.width / n
+        values.forEachIndexed { i, v ->
+            val h = v.coerceIn(0.05f, 1f) * size.height
+            drawRoundRect(
+                color = accent.copy(alpha = 0.9f),
+                topLeft = Offset(i * bw + bw * 0.2f, (size.height - h) / 2f),
+                size = androidx.compose.ui.geometry.Size(bw * 0.6f, h),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(bw * 0.3f)
+            )
+        }
+    }
+}
+
+@Composable
+fun Knob(label: String, valueText: String, value: Float, accent: Color, onChange: (Float) -> Unit) {
+    val current by rememberUpdatedState(value)
+    val change by rememberUpdatedState(onChange)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(
+            modifier = Modifier
+                .size(78.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures { pc, drag ->
+                        pc.consume()
+                        change((current - drag.y / 350f + drag.x / 700f).coerceIn(0f, 1f))
+                    }
+                }
+        ) {
+            val r = size.minDimension / 2f
+            drawCircle(Color(0xFF1B1B1F), radius = r)
+            drawCircle(accent.copy(alpha = 0.4f), radius = r, style = Stroke(3f))
+            drawArc(
+                color = accent,
+                startAngle = 135f,
+                sweepAngle = 270f * current,
+                useCenter = false,
+                topLeft = Offset(8f, 8f),
+                size = androidx.compose.ui.geometry.Size(size.width - 16f, size.height - 16f),
+                style = Stroke(width = 6f, cap = StrokeCap.Round)
+            )
+            rotate(degrees = -135f + 270f * current) {
+                drawLine(
+                    color = Color.White,
+                    start = Offset(center.x, center.y - r * 0.25f),
+                    end = Offset(center.x, center.y - r * 0.65f),
+                    strokeWidth = 5f,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(valueText, color = accent, fontSize = 11.sp)
+    }
+}
+
+@Composable
+fun ChipRow(items: List<String>, selected: Int, accent: Color, onSelect: (Int) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        items.forEachIndexed { i, t ->
+            val sel = i == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (sel) accent else Color(0x33FFFFFF))
+                    .clickable { onSelect(i) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = t,
+                    color = if (sel) Color.Black else Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ActionButton(
+    text: String,
+    color: Color,
+    textColor: Color = Color.Black,
+    enabled: Boolean = true,
+    pulse: Boolean = false,
+    onClick: () -> Unit
+) {
+    val inf = rememberInfiniteTransition(label = "btnInf")
+    val s by inf.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "btnScale"
+    )
+    val scale = if (pulse) s else 1f
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (enabled) color else color.copy(alpha = 0.25f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = textColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun SplashScreen() {
+    val inf = rememberInfiniteTransition(label = "splashInf")
+    val glow by inf.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "splashGlow"
+    )
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appear.animateTo(1f, tween(1100, easing = FastOutSlowInEasing))
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF041C15), Color(0xFF0B3B2D), Color(0xFF03120D)))),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                Canvas(modifier = Modifier.size(280.dp)) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(Color(0xFF00F5D4).copy(alpha = glow * 0.6f), Color.Transparent)
+                        ),
+                        radius = size.minDimension / 2f * (0.85f + 0.15f * glow)
+                    )
+                }
+                Image(
+                    painter = painterResource(R.drawable.ic_launcher),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(170.dp)
+                        .graphicsLayer {
+                            val sc = 0.6f + 0.4f * appear.value
+                            scaleX = sc
+                            scaleY = sc
+                            alpha = appear.value
+                        }
+                        .clip(RoundedCornerShape(36.dp))
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                text = "Gulame Mustafa",
+                color = Color(0xFFF6E27F),
+                fontSize = 26.sp,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.graphicsLayer { alpha = appear.value }
+            )
+            Text(
+                text = "BAAPU DIGITAL DELAY",
+                color = Color(0xFF00F5D4),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp,
+                modifier = Modifier.graphicsLayer { alpha = appear.value }
+            )
+        }
+    }
+}
+
